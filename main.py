@@ -32,7 +32,7 @@ import time
 import cv2
 import numpy as np
 
-from sweep import WristTracker, pick_camera, open_camera
+from sweep import WristTracker, pick_camera, open_camera, save_camera
 from box_client import Box
 from tones import Tones
 from listen import Listener, to_noun
@@ -70,7 +70,10 @@ def main():
     from detect import Detector
     detector = Detector()
 
-    cam = args.cam if args.cam is not None else pick_camera()
+    if args.cam is not None:
+        cam, _ = args.cam, save_camera(args.cam)
+    else:
+        cam = pick_camera()
     cap = open_camera(cam)
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -85,6 +88,7 @@ def main():
     flash_until = 0.0
     typing = False
     typed = ""
+    sized = args.headless
     times = collections.deque(maxlen=30)
     status = ("press t, type what you want, Enter" if args.typed
               else "press SPACE, say what you want, press SPACE again")
@@ -109,7 +113,11 @@ def main():
         print(status, flush=True)
 
     if not args.headless:
-        cv2.namedWindow("crosshair")
+        # Created with WINDOW_NORMAL and resized once we have a real frame.
+        # A window made before the first imshow sizes itself to nothing useful
+        # and then keeps that size, which leaves the video in a grey letterbox.
+        cv2.namedWindow("crosshair", cv2.WINDOW_NORMAL)
+        cv2.resizeWindow("crosshair", 1280, 720)
     t_quit = time.perf_counter() + args.secs if args.secs else None
 
     if args.say:                                  # scripted run, no microphone
@@ -182,6 +190,9 @@ def main():
         if args.headless:
             continue
 
+        if not sized:
+            cv2.resizeWindow("crosshair", frame.shape[1], frame.shape[0])
+            sized = True
         cv2.imshow("crosshair", frame)
         k = cv2.waitKey(1) & 0xFF
 

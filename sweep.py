@@ -15,6 +15,8 @@ Keys
 """
 import argparse
 import collections
+import json
+import os
 import re
 import subprocess
 import time
@@ -102,26 +104,39 @@ def open_camera(idx, width=1280, height=720):
     return cap
 
 
+CAM_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "camera.json")
+
+
 def pick_camera(prefer="Brio", max_idx=5):
-    """Pick the external webcam by NAME, never by how interesting the picture is.
+    """Return the index of the EXTERNAL camera.
 
-    An earlier version scored on image variance and cheerfully chose the
-    built-in camera, because a face is livelier than a table. The chest camera
-    is defined by which device it is, not by what it happens to be looking at.
+    Three things make this harder than it looks, all learned the hard way:
 
-    Still verifies the chosen index delivers frames: on this Mac some indices
-    open and then hand back nothing at all.
+      1. OpenCV's AVFoundation backend enumerates in the OPPOSITE order to
+         system_profiler and ffmpeg. macOS lists the built-in first; OpenCV
+         hands back the external one at index 0. Verified by covering the
+         Logitech's lens and seeing which index went dark.
+      2. An index can open and then deliver no frames at all.
+      3. Nothing in OpenCV will tell you a device's name, so this cannot be
+         resolved by asking.
+
+    So: use a saved answer if there is one, otherwise take the lowest index
+    that actually delivers frames, which on this machine is the external cam.
+    Override with --cam, which writes the choice back here.
     """
-    names = camera_names()
-    order = [i for i, n in enumerate(names) if prefer.lower() in n.lower()]
-    order += [i for i, n in enumerate(names)
-              if i not in order and "macbook" not in n.lower()]
-    order += [i for i in range(max(len(names), max_idx)) if i not in order]
+    saved = None
+    try:
+        with open(CAM_CONFIG) as f:
+            saved = json.load(f).get("index")
+    except Exception:
+        pass
 
-    for i in order:
+    working = []
+    for i in range(max_idx):
         got = None
-        for wh in ((1280, 720), (640, 480)):     # drop resolution before
-            cap = open_camera(i, *wh)            # giving up on a device
+        for wh in ((1280, 720), (640, 480)):
+            cap = open_camera(i, *wh)
             if cap.isOpened():
                 for _ in range(10):
                     ok, f = cap.read()
@@ -131,11 +146,28 @@ def pick_camera(prefer="Brio", max_idx=5):
             if got is not None:
                 break
         if got is not None:
-            label = names[i] if i < len(names) else "?"
-            print(f"camera {i}: {label}")
-            return i
-    print("no camera delivered a frame")
-    return None
+            working.append(i)
+
+    if not working:
+        print("no camera delivered a frame")
+        return None
+    if saved is not None and saved in working:
+        print(f"camera {saved} (saved in camera.json)")
+        return saved
+    choice = working[0]
+    names = camera_names()
+    hint = ("external" if len(working) > 1 else "only one working")
+    print(f"camera {choice} of {working} ({hint}; macOS calls them {names})")
+    return choice
+
+
+def save_camera(idx):
+    try:
+        with open(CAM_CONFIG, "w") as f:
+            json.dump({"index": idx}, f)
+        print(f"saved camera {idx} to camera.json")
+    except Exception as e:
+        print(f"could not save camera choice: {e}")
 
 
 def main():
