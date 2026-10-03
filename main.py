@@ -46,6 +46,9 @@ def main():
     ap.add_argument("--host", default=None, help="Pi running buzzbox.py")
     ap.add_argument("--cam", type=int, default=None)
     ap.add_argument("--model", default="small.en")
+    ap.add_argument("--type", dest="typed", action="store_true",
+                    help="type what you want instead of saying it; skips "
+                         "loading whisper entirely")
     ap.add_argument("--mute", action="store_true",
                     help="run the whole loop with no sound (you are in a library)")
     ap.add_argument("--out", default=None, type=int,
@@ -60,8 +63,10 @@ def main():
 
     box = (Box(args.host, on_button=None) if args.host
            else Tones(device=args.out, mute=args.mute))
-    listener = Listener(args.model,
-                        args.mic if args.mic is not None else "auto")
+    listener = None
+    if not args.typed:
+        listener = Listener(args.model,
+                            args.mic if args.mic is not None else "auto")
     from detect import Detector
     detector = Detector()
 
@@ -78,8 +83,11 @@ def main():
     crossings = 0
     recording = False
     flash_until = 0.0
+    typing = False
+    typed = ""
     times = collections.deque(maxlen=30)
-    status = "press SPACE, say what you want, press SPACE again"
+    status = ("press t, type what you want, Enter" if args.typed
+              else "press SPACE, say what you want, press SPACE again")
 
     def search(frame, said):
         nonlocal target, phrase, crossings, status, prev
@@ -160,9 +168,14 @@ def main():
         cv2.putText(frame, f"{1000/max(ms,1):4.1f} fps  {ms:4.1f} ms  "
                            f"crossings {crossings}", (12, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(frame, "RECORDING" if recording else status, (12, h - 18),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                    (0, 0, 255) if recording else (0, 200, 255), 2)
+        if typing:
+            line, colour = f"> {typed}_", (0, 255, 0)
+        elif recording:
+            line, colour = "RECORDING", (0, 0, 255)
+        else:
+            line, colour = status, (0, 200, 255)
+        cv2.putText(frame, line, (12, h - 18),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour, 2)
 
         if t_quit and time.perf_counter() > t_quit:
             break
@@ -171,12 +184,32 @@ def main():
 
         cv2.imshow("crosshair", frame)
         k = cv2.waitKey(1) & 0xFF
+
+        if typing:
+            # Typing swallows every key, so this branch comes first and
+            # continues. Otherwise 'q' in "liquid" quits the program.
+            if k == 13 or k == 10:               # Enter
+                typing = False
+                if typed.strip():
+                    search(frame, typed.strip())
+                typed = ""
+            elif k == 27:                        # Esc
+                typing, typed = False, ""
+            elif k in (8, 127):                  # Backspace
+                typed = typed[:-1]
+            elif 32 <= k < 127:
+                typed += chr(k)
+            continue
+
+        if k == ord('t'):
+            typing, typed = True, ""
+            continue
         if k == ord('q'):
             break
         if k == ord('r'):
             target, prev, crossings = None, None, 0
             box.stop(); status = "press SPACE, say what you want, press again"
-        if k == ord(' '):
+        if k == ord(' ') and listener is not None:
             # OpenCV windows give no key-up event, so SPACE toggles rather
             # than holds: press to start talking, press again when done.
             if not recording:
