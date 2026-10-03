@@ -33,6 +33,7 @@ import cv2
 import numpy as np
 
 from sweep import WristTracker, pick_camera, open_camera, save_camera
+from track import Lock
 from box_client import Box
 from tones import Tones
 from listen import Listener, to_noun
@@ -79,7 +80,7 @@ def main():
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     track = WristTracker()
-    target = None           # (x, y) of the thing, normalised
+    lock = None             # a tracked object, not a frozen coordinate
     phrase = ""
     prev = None
     last_cross = 0.0
@@ -94,7 +95,7 @@ def main():
               else "press SPACE, say what you want, press SPACE again")
 
     def search(frame, said):
-        nonlocal target, phrase, crossings, status, prev
+        nonlocal lock, phrase, crossings, status, prev
         phrase = to_noun(said)
         if not phrase:
             status = "did not catch that"
@@ -103,12 +104,12 @@ def main():
         print(status, flush=True)
         r = detector.find(frame, phrase)
         if r is None:
-            target, status = None, f"cannot see a {phrase}"
+            lock, status = None, f"cannot see a {phrase}"
             box.beep(300, 220)                   # one low note = not found
         else:
-            target = (r[0], r[1])
+            lock = Lock(frame, r[3], phrase, r[2])
             crossings, prev = 0, None
-            status = f"{phrase} at x={r[0]:.2f} (score {r[2]:.2f}) - sweep now"
+            status = f"{phrase} locked (score {r[2]:.2f}) - sweep now"
             box.lock()
         print(status, flush=True)
 
@@ -137,6 +138,13 @@ def main():
         hit = track(rgb)
         times.append(time.perf_counter() - t0)
         now = time.perf_counter()
+
+        if lock is not None and not lock.update(frame):
+            status = f"lost the {lock.phrase}, press t and ask again"
+            lock = None
+            box.stop()
+
+        target = lock.centre if lock is not None else None
 
         if hit and target is not None:
             wx, wy, _vis = hit
@@ -167,10 +175,8 @@ def main():
 
         if now < flash_until:           # silent mode still needs to tell you
             cv2.rectangle(frame, (0, 0), (w - 1, h - 1), (0, 255, 0), 28)
-        if target is not None:
-            tx, ty = int(target[0] * w), int(target[1] * h)
-            cv2.line(frame, (tx, 0), (tx, h), (0, 0, 255), 2)
-            cv2.circle(frame, (tx, ty), 10, (0, 0, 255), 2)
+        if lock is not None:
+            lock.draw(frame)
 
         ms = 1000 * float(np.mean(times)) if times else 0
         cv2.putText(frame, f"{1000/max(ms,1):4.1f} fps  {ms:4.1f} ms  "
@@ -218,7 +224,7 @@ def main():
         if k == ord('q'):
             break
         if k == ord('r'):
-            target, prev, crossings = None, None, 0
+            lock, prev, crossings = None, None, 0
             box.stop(); status = "press SPACE, say what you want, press again"
         if k == ord(' ') and listener is not None:
             # OpenCV windows give no key-up event, so SPACE toggles rather
