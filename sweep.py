@@ -22,6 +22,7 @@ import numpy as np
 import mediapipe as mp
 
 from box_client import Box
+from tones import Tones
 
 RE_ARM_S = 0.45          # ignore a second crossing this soon after one
 MIN_SPEED = 0.03         # frac of width per second, below this it is not a sweep
@@ -90,14 +91,23 @@ def pick_camera(max_idx=5):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--host", default=None, help="Pi address running buzzbox.py")
+    ap.add_argument("--host", default=None,
+                    help="Pi running buzzbox.py. Omit and the laptop beeps "
+                         "instead, which needs nothing plugged in.")
     ap.add_argument("--cam", type=int, default=None,
                     help="camera index, default = auto-pick one that reads")
+    ap.add_argument("--headless", action="store_true",
+                    help="no window; useful when the person running it cannot "
+                         "see the screen")
+    ap.add_argument("--target", type=float, default=None,
+                    help="place the target at this fraction of frame width")
+    ap.add_argument("--secs", type=float, default=0.0, help="auto-quit after N s")
     ap.add_argument("--lead", type=float, default=0.0,
                     help="seconds of pipeline latency to fire early by")
     args = ap.parse_args()
 
-    box = Box(args.host) if args.host else None
+    # The Pi is an upgrade, not a dependency. Same four methods either way.
+    box = Box(args.host) if args.host else Tones()
 
     cam = args.cam if args.cam is not None else pick_camera()
     if cam is None:
@@ -124,11 +134,15 @@ def main():
         if event == cv2.EVENT_LBUTTONDOWN:
             target = mx / float(w)
             crossings = 0
-            if box:
-                box.lock()
+            box.lock()
 
-    cv2.namedWindow("crosshair")
-    cv2.setMouseCallback("crosshair", on_mouse)
+    if not args.headless:
+        cv2.namedWindow("crosshair")
+        cv2.setMouseCallback("crosshair", on_mouse)
+    if args.target is not None:
+        target = args.target
+        box.lock()
+    t_quit = time.perf_counter() + args.secs if args.secs else None
 
     while True:
         t_cap = time.perf_counter()
@@ -163,8 +177,10 @@ def main():
                             and now - last_cross > RE_ARM_S):
                         last_cross = now
                         crossings += 1
-                        if box:
-                            box.cross()
+                        box.cross()
+                        if args.headless:
+                            print(f"  CROSS #{crossings}  at x={wx:.3f} "
+                                  f"speed={vx:+.2f}/s", flush=True)
                         cv2.circle(frame, (int(target * w), py), 40,
                                    (0, 0, 255), 4)
             prev = (now, wx)
@@ -187,18 +203,20 @@ def main():
             cv2.putText(frame, "click to place a target", (12, h - 18),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
 
+        if t_quit and time.perf_counter() > t_quit:
+            break
+        if args.headless:
+            continue
         cv2.imshow("crosshair", frame)
         k = cv2.waitKey(1) & 0xFF
         if k == ord('q'):
             break
         if k == ord('r'):
             target, prev, crossings = None, None, 0
-            if box:
-                box.stop()
+            box.stop()
         if k == ord(' ') and wx is not None:
             target, crossings = wx, 0
-            if box:
-                box.lock()
+            box.lock()
 
     cap.release()
     cv2.destroyAllWindows()
