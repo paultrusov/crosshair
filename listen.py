@@ -8,9 +8,13 @@ import sys
 import threading
 import time
 
+import os
+import subprocess
+import sys
+import wave
+
 import numpy as np
 import sounddevice as sd
-from faster_whisper import WhisperModel
 
 SR = 16000
 
@@ -44,19 +48,38 @@ def to_noun(text):
 
 
 class Listener:
+    """Records here, transcribes in a child process. See whisper_worker.py for
+    why the model cannot live in this process."""
+
     def __init__(self, model="small.en", device_index=None):
-        print(f"loading whisper {model} ...", flush=True)
-        self.model = WhisperModel(model, device="cpu", compute_type="int8",
-                                  cpu_threads=8)
         self.device_index = device_index
         self._buf = []
         self._stream = None
+        here = os.path.dirname(os.path.abspath(__file__))
+        print(f"starting whisper worker ({model}) ...", flush=True)
+        self.proc = subprocess.Popen(
+            [sys.executable, "-u", os.path.join(here, "whisper_worker.py"), model],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, bufsize=1)
+        # Intel MKL prints a deprecation banner to STDOUT before anything we
+        # write, so the handshake has to scan for READY rather than trust the
+        # first line.
+        for _ in range(40):
+            line = self.proc.stdout.readline()
+            if not line:
+                raise RuntimeError("whisper worker died during startup")
+            if line.strip() == "READY":
+                break
+        else:
+            raise RuntimeError("whisper worker never said READY")
         print("whisper ready", flush=True)
 
     def start(self):
         self._buf = []
+
         def cb(indata, frames, t, status):
             self._buf.append(indata.copy())
+
         self._stream = sd.InputStream(samplerate=SR, channels=1,
                                       dtype="float32", callback=cb,
                                       device=self.device_index)
@@ -68,15 +91,35 @@ class Listener:
         self._stream.stop(); self._stream.close(); self._stream = None
         if not self._buf:
             return ""
-        audio = np.concatenate(self._buf).flatten().astype(np.float32)
+        audio = np.concatenate(self._buf).flatten()
         if len(audio) < SR * 0.3:
             return ""
-        segs, _info = self.model.transcribe(audio, beam_size=1,
-                                            language="en", vad_filter=True)
-        return " ".join(s.text for s in segs).strip()
+        path = "/tmp/crosshair_say.wav"
+        pcm = (np.clip(audio, -1, 1) * 32767).astype(np.int16)
+        with wave.open(path, "wb") as f:
+            f.setnchannels(1); f.setsampwidth(2); f.setframerate(SR)
+            f.writeframes(pcm.tobytes())
+        self.proc.stdin.write(path + "\n")
+        self.proc.stdin.flush()
+        for _ in range(10):
+            line = self.proc.stdout.readline()
+            if not line:
+                return ""
+            t = line.strip()
+            if t.startswith("Intel MKL") or t == "READY":
+                continue
+            return "" if t.startswith("ERR ") else t
+        return ""
 
     def record_for(self, secs):
+        import time
         self.start(); time.sleep(secs); return self.stop()
+
+    def close(self):
+        try:
+            self.proc.stdin.close(); self.proc.wait(timeout=3)
+        except Exception:
+            self.proc.kill()
 
 
 if __name__ == "__main__":

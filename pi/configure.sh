@@ -55,11 +55,16 @@ TOML
 
 # Second way in: USB gadget ethernet over the Pi's own USB-C port, so a
 # flaky hotspot cannot strand us.
-grep -q "^dtoverlay=dwc2" "$BOOT/config.txt" || cat >> "$BOOT/config.txt" <<'CFG'
+# Must match our own marker, not any dwc2 line: the stock config.txt
+# already carries "dtoverlay=dwc2,dr_mode=host" under [cm5], so a loose
+# grep silently skips this whole block and gadget mode never works.
+grep -q "^# crosshair: USB gadget" "$BOOT/config.txt" || cat >> "$BOOT/config.txt" <<'CFG'
 
 # crosshair: USB gadget mode. The Pi appears to the laptop as a network
 # adapter over the same USB-C cable that powers it.
 dtoverlay=dwc2,dr_mode=peripheral
+# Let the Pi 5 draw full current from a supply that does not advertise 5A.
+usb_max_current_enable=1
 CFG
 grep -q "modules-load=dwc2" "$BOOT/cmdline.txt" || \
   sed -i '' 's/rootwait/rootwait modules-load=dwc2,g_ether/' "$BOOT/cmdline.txt"

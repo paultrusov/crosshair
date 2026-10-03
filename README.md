@@ -41,12 +41,20 @@ Pi:
 
 ## Run
 
-    python camera_check.py              # which camera, and can it see the sweep
-    python sweep.py --host <pi-ip>      # the core loop
-    python sweep.py                     # same, silent, no Pi needed
+    python main.py                      # the whole thing
+    python main.py --host crosshair.local   # beeps from the Pi instead
 
-In `sweep.py`: click to place a target, or press space to put it at your
-wrist. Sweep across it. Press r to reset, q to quit.
+SPACE to talk, SPACE again when done. r resets, q quits.
+
+Parts, runnable alone when something is misbehaving:
+
+    python camera_check.py              # which camera, and can it see a sweep
+    python fov_test.py 15               # headless version of the same
+    python bench.py                     # fps and end-to-end latency
+    python listen.py 4                  # say something, see what it heard
+    python detect.py "ketchup" "mug"    # point the camera, see what it finds
+    python sweep.py                     # crossing logic with a hand-placed target
+    python tones.py                     # just the sounds
 
 ## Sound design
 
@@ -58,9 +66,24 @@ wrist. Sweep across it. Press r to reset, q to quit.
 
 ## Measured on this hardware
 
-- MediaPipe Pose (lite): **8.0 ms/frame**, ~125 fps ceiling.
-  For comparison, YOLO nano on a Pi 5 is 67-128 ms. That gap is the whole
-  reason the vision runs on the laptop.
+Logitech Brio 101 at 1280x720, on a MacBook whose conda is x86 under Rosetta,
+so these are pessimistic:
+
+| | |
+|---|---|
+| sustained | 29.8 fps |
+| pose inference | 14.3 ms |
+| **end to end** | **33.6 ms**, p95 36.3 ms |
+| wrist found | 98% of frames |
+| field of view | hand crossed 66% of frame width, 0 dropouts |
+| open-vocab detection | ~0.9 s per query, run once at lock |
+
+For comparison, YOLO nano on a Pi 5 is 67-128 ms for a *closed* 80-class
+model. That gap is the whole reason the vision runs on the laptop.
+
+Proof the open vocabulary claim is real: on a random frame of the hackathon
+room it found a **thermostat** at 0.83 confidence. Thermostat is not a COCO
+class and not one of Lookout's seven categories.
 
 ## Dead ends, do not revisit
 
@@ -73,6 +96,25 @@ wrist. Sweep across it. Press r to reset, q to quit.
 - The vertical sweep. From a sternum camera, how high an object looks is
   mostly a function of how far away it is. Distance goes on the pulse rate
   during the reach instead.
+
+## Traps already paid for, do not rediscover
+
+- **MediaPipe has no build for Python 3.13.** The 3.11 env is not optional.
+- **This conda is x86 under Rosetta**, which caps torch at 2.2.2, which in
+  turn caps transformers below 4.50.
+- **faster-whisper and torch each link their own OpenMP.** In one process they
+  do not warn, they deadlock on model load. `KMP_DUPLICATE_LIB_OK` silences
+  the message and does not fix the hang. Whisper runs in its own process.
+- **Intel MKL prints a banner to stdout**, so a subprocess handshake must scan
+  for its marker rather than trust the first line.
+- **Camera index 0 opens and returns no frames** (Continuity camera), another
+  index returns all-black frames, and the indices shift when devices attach.
+  `pick_camera()` scores on image variance after warming up.
+- **The stock `config.txt` already contains `dtoverlay=dwc2,dr_mode=host`**
+  under `[cm5]`, so a loose grep for dwc2 silently skips adding gadget mode.
+- **`tr -dc ... | head -c N` makes tr take SIGPIPE**, which under
+  `set -o pipefail` kills a shell script with no message at all.
+- **A Pi 5 will not boot off a laptop USB port.** It wants 5 A.
 
 ## Claims to never make on stage
 
