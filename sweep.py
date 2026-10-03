@@ -60,22 +60,31 @@ class WristTracker:
 
 
 def pick_camera(max_idx=5):
-    """Return the highest index that actually DELIVERS a frame.
+    """Return the camera index that delivers a real picture.
 
-    On this Mac index 0 opens and then hands back nothing (Continuity camera),
-    which looks exactly like a broken build. Opening is not evidence; a frame is.
-    Highest-first because the USB webcam enumerates after the built-in one.
+    Two traps on this Mac, both of which look like a broken build:
+      - index 0 opens and then hands back no frames at all (Continuity camera)
+      - another index reads fine but every frame is black (lens covered)
+    So opening is not evidence, and neither is reading. Score on image
+    variance and take the liveliest.
     """
-    best = None
+    best, best_score = None, 0.0
     for i in range(max_idx):
         cap = cv2.VideoCapture(i)
+        score = 0.0
         if cap.isOpened():
-            for _ in range(8):
-                ok, _f = cap.read()
+            got = None
+            for _ in range(12):            # let auto-exposure settle first,
+                ok, f = cap.read()         # a cold first frame scores near zero
                 if ok:
-                    best = i
-                    break
+                    got = f
+            if got is not None:
+                score = float(np.std(got))
         cap.release()
+        if score > best_score:
+            best, best_score = i, score
+    if best is not None:
+        print(f"camera {best} (variance {best_score:.1f})")
     return best
 
 
