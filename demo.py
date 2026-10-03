@@ -22,6 +22,7 @@ import numpy as np
 
 from sweep import pick_camera, open_camera
 from track import Lock
+from redetect import Anchor
 
 QUERY = "water bottle"
 
@@ -75,6 +76,7 @@ def main():
 
     stage = 0
     lock = None
+    anchor = None           # background re-detection, keeps the box honest
     typed_chars = 0          # how much of QUERY has "appeared" so far
     type_started = None
     searched = False
@@ -94,6 +96,7 @@ def main():
                 r = detector.find(frame, QUERY)
                 if r is not None:
                     lock = Lock(frame, r[3], QUERY, r[2])
+                    anchor = Anchor(detector, QUERY)
                     stage = 2
                     print(f"locked {QUERY} score {r[2]:.2f}", flush=True)
                 else:
@@ -102,6 +105,15 @@ def main():
 
         if lock is not None:
             lock.update(frame)
+
+        if anchor is not None:
+            fresh = anchor.take()
+            if fresh is not None:
+                box, score = fresh
+                # Re-seed the tracker on the detector's answer. Cheap, and it
+                # is the only thing that can undo drift.
+                lock = Lock(frame, box, QUERY, score)
+            anchor.offer(frame)
 
         name_, colour, text = STAGES[stage]
 
@@ -134,9 +146,13 @@ def main():
         elif k == ord('e') and lock is not None:
             stage = 4
         elif k == ord('r'):
-            stage, lock, typed_chars = 0, None, 0
+            if anchor is not None:
+                anchor.close()
+            stage, lock, anchor, typed_chars = 0, None, None, 0
             type_started, searched = None, False
 
+    if anchor is not None:
+        anchor.close()
     cap.release(); writer.release(); cv2.destroyAllWindows()
     print(f"saved sessions/{name}.mp4", flush=True)
 
