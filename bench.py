@@ -5,15 +5,12 @@ latency, and whether a wrist is actually being found.
 """
 import sys, time, collections
 import cv2, numpy as np
-from sweep import WristTracker
+from sweep import WristTracker, open_camera
 
 idx = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 secs = float(sys.argv[2]) if len(sys.argv) > 2 else 8.0
 
-cap = cv2.VideoCapture(idx)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+cap = open_camera(idx)
 if not cap.isOpened():
     print(f"camera index {idx} would not open"); sys.exit(1)
 

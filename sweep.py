@@ -81,6 +81,27 @@ def camera_names():
     return names
 
 
+def open_camera(idx, width=1280, height=720):
+    """Open a camera asking for MJPEG, not raw frames.
+
+    A webcam on a USB 2.0 hub cannot deliver 720p uncompressed: it enumerates,
+    macOS lists it, and it then hands back no frames at all while OpenCV
+    silently falls back to the built-in camera. MJPEG is roughly a fifth the
+    bandwidth and fits. Ask for it BEFORE setting the size; the order matters.
+    """
+    cap = cv2.VideoCapture(idx)
+    if not cap.isOpened():
+        return cap
+    try:
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    except Exception:
+        pass
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    return cap
+
+
 def pick_camera(prefer="Brio", max_idx=5):
     """Pick the external webcam by NAME, never by how interesting the picture is.
 
@@ -98,14 +119,17 @@ def pick_camera(prefer="Brio", max_idx=5):
     order += [i for i in range(max(len(names), max_idx)) if i not in order]
 
     for i in order:
-        cap = cv2.VideoCapture(i)
         got = None
-        if cap.isOpened():
-            for _ in range(10):
-                ok, f = cap.read()
-                if ok and f is not None:
-                    got = f
-        cap.release()
+        for wh in ((1280, 720), (640, 480)):     # drop resolution before
+            cap = open_camera(i, *wh)            # giving up on a device
+            if cap.isOpened():
+                for _ in range(10):
+                    ok, f = cap.read()
+                    if ok and f is not None:
+                        got = f
+            cap.release()
+            if got is not None:
+                break
         if got is not None:
             label = names[i] if i < len(names) else "?"
             print(f"camera {i}: {label}")

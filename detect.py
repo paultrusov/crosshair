@@ -64,12 +64,11 @@ class Detector:
 
 if __name__ == "__main__":
     import sys, cv2
-    from sweep import pick_camera
+    from sweep import pick_camera, open_camera
 
     phrases = sys.argv[1:] or ["water bottle", "laptop", "chair", "person"]
     cam = pick_camera()
-    cap = cv2.VideoCapture(cam)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280); cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap = open_camera(cam)
     frame = None
     for _ in range(15):
         ok, f = cap.read()

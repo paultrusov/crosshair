@@ -5,14 +5,12 @@ says whether the lens can actually follow the hand across the sweep.
 """
 import sys, time
 import cv2, numpy as np
-from sweep import WristTracker, pick_camera
+from sweep import WristTracker, pick_camera, open_camera
 
 secs = float(sys.argv[1]) if len(sys.argv) > 1 else 15.0
 cam = int(sys.argv[2]) if len(sys.argv) > 2 else pick_camera()
 
-cap = cv2.VideoCapture(cam)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280); cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+cap = open_camera(cam)
 for _ in range(10): cap.read()
 
 delay = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0

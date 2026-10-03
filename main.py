@@ -32,7 +32,7 @@ import time
 import cv2
 import numpy as np
 
-from sweep import WristTracker, pick_camera
+from sweep import WristTracker, pick_camera, open_camera
 from box_client import Box
 from tones import Tones
 from listen import Listener, to_noun
@@ -46,6 +46,10 @@ def main():
     ap.add_argument("--host", default=None, help="Pi running buzzbox.py")
     ap.add_argument("--cam", type=int, default=None)
     ap.add_argument("--model", default="small.en")
+    ap.add_argument("--mute", action="store_true",
+                    help="run the whole loop with no sound (you are in a library)")
+    ap.add_argument("--out", default=None, type=int,
+                    help="audio output device index, e.g. your headphones")
     ap.add_argument("--mic", default=None, type=int,
                     help="input device index; default is the camera's own mic")
     ap.add_argument("--headless", action="store_true")
@@ -54,17 +58,15 @@ def main():
     ap.add_argument("--secs", type=float, default=0.0)
     args = ap.parse_args()
 
-    box = Box(args.host, on_button=None) if args.host else Tones()
+    box = (Box(args.host, on_button=None) if args.host
+           else Tones(device=args.out, mute=args.mute))
     listener = Listener(args.model,
                         args.mic if args.mic is not None else "auto")
     from detect import Detector
     detector = Detector()
 
     cam = args.cam if args.cam is not None else pick_camera()
-    cap = cv2.VideoCapture(cam)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    cap = open_camera(cam)
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
@@ -75,6 +77,7 @@ def main():
     last_cross = 0.0
     crossings = 0
     recording = False
+    flash_until = 0.0
     times = collections.deque(maxlen=30)
     status = "press SPACE, say what you want, press SPACE again"
 
@@ -137,6 +140,7 @@ def main():
                         last_cross = now
                         crossings += 1
                         box.cross()
+                        flash_until = now + 0.25
                         print(f"  CROSS #{crossings} at x={wx:.3f}", flush=True)
             # distance proxy: how near the hand is to the object in frame
             d = np.hypot(wx - target[0], wy - target[1])
@@ -145,6 +149,8 @@ def main():
         elif target is not None:
             box.rate(0.0)
 
+        if now < flash_until:           # silent mode still needs to tell you
+            cv2.rectangle(frame, (0, 0), (w - 1, h - 1), (0, 255, 0), 28)
         if target is not None:
             tx, ty = int(target[0] * w), int(target[1] * h)
             cv2.line(frame, (tx, 0), (tx, h), (0, 0, 255), 2)

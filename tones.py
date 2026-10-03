@@ -29,9 +29,15 @@ def _burst(hz, ms, amp=0.35):
     return w.astype(np.float32)
 
 
+def list_outputs():
+    return [(i, d["name"]) for i, d in enumerate(sd.query_devices())
+            if d["max_output_channels"] > 0]
+
+
 class Tones:
-    def __init__(self, device=None):
+    def __init__(self, device=None, mute=False):
         self.device = device
+        self.mute = mute
         self._rate = 0.0
         self.running = True
         self._lock = threading.Lock()
@@ -48,6 +54,10 @@ class Tones:
         threading.Thread(target=self._pulse_loop, daemon=True).start()
 
     def _play(self, buf, block=False):
+        if self.mute:
+            if block:
+                time.sleep(len(buf) / SR)   # keep timing identical when muted,
+            return                           # so what you test is what you ship
         with self._lock:
             sd.play(buf, SR, blocking=block)
 
