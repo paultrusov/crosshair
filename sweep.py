@@ -15,6 +15,8 @@ Keys
 """
 import argparse
 import collections
+import re
+import subprocess
 import time
 
 import cv2
@@ -60,33 +62,56 @@ class WristTracker:
         return float(best.x), float(best.y), float(best_v)
 
 
-def pick_camera(max_idx=5):
-    """Return the camera index that delivers a real picture.
+def camera_names():
+    """Camera names in the order AVFoundation (and therefore OpenCV) sees them.
 
-    Two traps on this Mac, both of which look like a broken build:
-      - index 0 opens and then hands back no frames at all (Continuity camera)
-      - another index reads fine but every frame is black (lens covered)
-    So opening is not evidence, and neither is reading. Score on image
-    variance and take the liveliest.
+    OpenCV gives no way to ask a device its name, so we ask macOS and rely on
+    the orders matching, which they do.
     """
-    best, best_score = None, 0.0
-    for i in range(max_idx):
+    try:
+        out = subprocess.run(["system_profiler", "SPCameraDataType"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return []
+    names = []
+    for line in out.splitlines():
+        m = re.match(r"^ {4}(\S.*):$", line)
+        if m:
+            names.append(m.group(1).strip())
+    return names
+
+
+def pick_camera(prefer="Brio", max_idx=5):
+    """Pick the external webcam by NAME, never by how interesting the picture is.
+
+    An earlier version scored on image variance and cheerfully chose the
+    built-in camera, because a face is livelier than a table. The chest camera
+    is defined by which device it is, not by what it happens to be looking at.
+
+    Still verifies the chosen index delivers frames: on this Mac some indices
+    open and then hand back nothing at all.
+    """
+    names = camera_names()
+    order = [i for i, n in enumerate(names) if prefer.lower() in n.lower()]
+    order += [i for i, n in enumerate(names)
+              if i not in order and "macbook" not in n.lower()]
+    order += [i for i in range(max(len(names), max_idx)) if i not in order]
+
+    for i in order:
         cap = cv2.VideoCapture(i)
-        score = 0.0
+        got = None
         if cap.isOpened():
-            got = None
-            for _ in range(12):            # let auto-exposure settle first,
-                ok, f = cap.read()         # a cold first frame scores near zero
-                if ok:
+            for _ in range(10):
+                ok, f = cap.read()
+                if ok and f is not None:
                     got = f
-            if got is not None:
-                score = float(np.std(got))
         cap.release()
-        if score > best_score:
-            best, best_score = i, score
-    if best is not None:
-        print(f"camera {best} (variance {best_score:.1f})")
-    return best
+        if got is not None:
+            label = names[i] if i < len(names) else "?"
+            print(f"camera {i}: {label}")
+            return i
+    print("no camera delivered a frame")
+    return None
 
 
 def main():
