@@ -47,12 +47,43 @@ def to_noun(text):
     return t.strip().lower()
 
 
+def _opens(idx):
+    """A device that lists is not a device that opens. The Brio's microphone
+    enumerates fine and then fails with PortAudio -9986, most likely because
+    OpenCV already holds that USB device for video."""
+    try:
+        sr = int(sd.query_devices(idx)["default_samplerate"])
+        st = sd.InputStream(samplerate=sr, channels=1, dtype="float32",
+                            device=idx)
+        st.start(); st.stop(); st.close()
+        return True
+    except Exception:
+        return False
+
+
+def pick_mic(prefer="Brio"):
+    """Prefer the camera's own mic, so the pod on the chest both sees and
+    hears. Fall back to whatever works, because a demo that cannot hear is
+    worse than a demo tethered to the laptop."""
+    devs = sd.query_devices()
+    cands = [i for i, d in enumerate(devs)
+             if d["max_input_channels"] > 0 and prefer.lower() in d["name"].lower()]
+    cands += [i for i, d in enumerate(devs) if d["max_input_channels"] > 0
+              and i not in cands]
+    for i in cands:
+        if _opens(i):
+            print(f"mic: {devs[i]['name']} (device {i})")
+            return i
+    print("mic: no input device would open")
+    return None
+
+
 class Listener:
     """Records here, transcribes in a child process. See whisper_worker.py for
     why the model cannot live in this process."""
 
-    def __init__(self, model="small.en", device_index=None):
-        self.device_index = device_index
+    def __init__(self, model="small.en", device_index="auto"):
+        self.device_index = pick_mic() if device_index == "auto" else device_index
         self._buf = []
         self._stream = None
         here = os.path.dirname(os.path.abspath(__file__))
@@ -80,7 +111,13 @@ class Listener:
         def cb(indata, frames, t, status):
             self._buf.append(indata.copy())
 
-        self._stream = sd.InputStream(samplerate=SR, channels=1,
+        # Record at whatever the device actually runs at and resample here.
+        # Asking a 48 kHz USB mic for 16 kHz fails on macOS with an opaque
+        # PortAudio -9986, because CoreAudio will not resample for us.
+        info = sd.query_devices(self.device_index if self.device_index is not None
+                                else sd.default.device[0])
+        self._native_sr = int(info["default_samplerate"])
+        self._stream = sd.InputStream(samplerate=self._native_sr, channels=1,
                                       dtype="float32", callback=cb,
                                       device=self.device_index)
         self._stream.start()
@@ -92,6 +129,11 @@ class Listener:
         if not self._buf:
             return ""
         audio = np.concatenate(self._buf).flatten()
+        native = getattr(self, "_native_sr", SR)
+        if native != SR:                       # linear resample to whisper's 16k
+            n_out = int(len(audio) * SR / native)
+            audio = np.interp(np.linspace(0, len(audio) - 1, n_out),
+                              np.arange(len(audio)), audio).astype(np.float32)
         if len(audio) < SR * 0.3:
             return ""
         path = "/tmp/crosshair_say.wav"

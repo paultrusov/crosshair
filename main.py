@@ -46,6 +46,8 @@ def main():
     ap.add_argument("--host", default=None, help="Pi running buzzbox.py")
     ap.add_argument("--cam", type=int, default=None)
     ap.add_argument("--model", default="small.en")
+    ap.add_argument("--mic", default=None, type=int,
+                    help="input device index; default is the camera's own mic")
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--say", default=None,
                     help="skip the microphone and search for this instead")
@@ -53,7 +55,8 @@ def main():
     args = ap.parse_args()
 
     box = Box(args.host, on_button=None) if args.host else Tones()
-    listener = Listener(args.model)
+    listener = Listener(args.model,
+                        args.mic if args.mic is not None else "auto")
     from detect import Detector
     detector = Detector()
 
