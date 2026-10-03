@@ -59,17 +59,43 @@ class WristTracker:
         return float(best.x), float(best.y), float(best_v)
 
 
+def pick_camera(max_idx=5):
+    """Return the highest index that actually DELIVERS a frame.
+
+    On this Mac index 0 opens and then hands back nothing (Continuity camera),
+    which looks exactly like a broken build. Opening is not evidence; a frame is.
+    Highest-first because the USB webcam enumerates after the built-in one.
+    """
+    best = None
+    for i in range(max_idx):
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            for _ in range(8):
+                ok, _f = cap.read()
+                if ok:
+                    best = i
+                    break
+        cap.release()
+    return best
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default=None, help="Pi address running buzzbox.py")
-    ap.add_argument("--cam", type=int, default=0)
+    ap.add_argument("--cam", type=int, default=None,
+                    help="camera index, default = auto-pick one that reads")
     ap.add_argument("--lead", type=float, default=0.0,
                     help="seconds of pipeline latency to fire early by")
     args = ap.parse_args()
 
     box = Box(args.host) if args.host else None
 
-    cap = cv2.VideoCapture(args.cam)
+    cam = args.cam if args.cam is not None else pick_camera()
+    if cam is None:
+        print("No camera delivers frames. Check the cable and the macOS "
+              "camera permission for your terminal.")
+        return
+    cap = cv2.VideoCapture(cam)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)        # latency, not smoothness
