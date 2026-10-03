@@ -17,6 +17,7 @@ The flow, and why it is in this order:
 The object does not move; only your hand does. So the detector runs once and
 the fast loop only tracks a wrist. That is what keeps the beep on time.
 """
+import json
 import os
 
 # faster-whisper (ctranslate2) and torch each link their own OpenMP runtime.
@@ -89,6 +90,7 @@ def main():
     flash_until = 0.0
     typing = False
     typed = ""
+    rec = None              # press v to start capturing a session
     sized = args.headless
     times = collections.deque(maxlen=30)
     status = ("press t, type what you want, Enter" if args.typed
@@ -133,6 +135,7 @@ def main():
         if not ok:
             continue
         frame = cv2.flip(frame, 1)
+        raw_frame = frame.copy()        # before any overlay, for the recording
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         rgb.flags.writeable = False
         hit = track(rgb)
@@ -190,11 +193,31 @@ def main():
             line, colour = status, (0, 200, 255)
         cv2.putText(frame, line, (12, h - 18),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour, 2)
+        if rec is not None:
+            cv2.circle(frame, (w - 30, 30), 12, (0, 0, 255), -1)
+            cv2.putText(frame, "REC", (w - 100, 38),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        if hit:
+            cv2.circle(frame, (int(hit[0] * w), int(hit[1] * h)), 16,
+                       (0, 255, 255), 3)
+        else:
+            cv2.putText(frame, "NO ARM", (12, 64), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.8, (0, 0, 255), 2)
 
         if t_quit and time.perf_counter() > t_quit:
             break
         if args.headless:
             continue
+
+        if rec is not None:
+            name, vw, jf, t_start = rec
+            vw.write(raw_frame)
+            jf.write(json.dumps({
+                "t": round(time.perf_counter() - t_start, 4),
+                "wrist": [round(hit[0], 4), round(hit[1], 4), round(hit[2], 3)] if hit else None,
+                "lock": [round(target[0], 4), round(target[1], 4)] if target else None,
+                "phrase": lock.phrase if lock is not None else None,
+            }) + "\n")
 
         if not sized:
             cv2.resizeWindow("crosshair", frame.shape[1], frame.shape[0])
@@ -216,6 +239,23 @@ def main():
                 typed = typed[:-1]
             elif 32 <= k < 127:
                 typed += chr(k)
+            continue
+
+        if k == ord('v'):
+            # Recording from inside the live window, because recording blind
+            # from a terminal produced three 25-second videos of a bench.
+            if rec is None:
+                os.makedirs("sessions", exist_ok=True)
+                name = time.strftime("rec%H%M%S")
+                vw = cv2.VideoWriter(f"sessions/{name}.mp4",
+                                     cv2.VideoWriter_fourcc(*"mp4v"), 30,
+                                     (w, h))
+                rec = (name, vw, open(f"sessions/{name}.jsonl", "w"), time.perf_counter())
+                print(f"RECORDING -> sessions/{name}", flush=True)
+            else:
+                name, vw, jf, _ = rec
+                vw.release(); jf.close(); rec = None
+                print(f"stopped, wrote sessions/{name}", flush=True)
             continue
 
         if k == ord('t'):

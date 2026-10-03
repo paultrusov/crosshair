@@ -4,3 +4,4 @@ __pycache__/
 .img/
 pi/keys/
 camera.json
+sessions/
