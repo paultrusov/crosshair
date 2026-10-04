@@ -2,6 +2,7 @@
 
     python main.py                 laptop beeps, no Pi needed
     python main.py --host crosshair.local     beeps come from the Pi
+    python main.py --voice         the same beeps, plus speech for the words
 
     SPACE  press, say what you want, press again
     r      reset
@@ -53,6 +54,10 @@ def main():
                          "loading whisper entirely")
     ap.add_argument("--mute", action="store_true",
                     help="run the whole loop with no sound (you are in a library)")
+    ap.add_argument("--voice", action="store_true",
+                    help="also speak what it found and roughly where, through "
+                         "xAI /v1/tts, or macOS say when there is no key. The "
+                         "beeps are identical either way")
     ap.add_argument("--out", default=None, type=int,
                     help="audio output device index, e.g. your headphones")
     ap.add_argument("--mic", default=None, type=int,
@@ -65,6 +70,13 @@ def main():
 
     box = (Box(args.host, on_button=None) if args.host
            else Tones(device=args.out, mute=args.mute))
+    # A second channel, not a replacement for the first. Everything timed stays
+    # on `box`; `voice` only ever carries words. Default off, so a run without
+    # the flag behaves exactly as it did before this existed.
+    voice = None
+    if args.voice:
+        from speak import Voice
+        voice = Voice(mute=args.mute)
     listener = None
     if not args.typed:
         listener = Listener(args.model,
@@ -108,11 +120,17 @@ def main():
         if r is None:
             lock, status = None, f"cannot see a {phrase}"
             box.beep(300, 220)                   # one low note = not found
+            if voice is not None:
+                voice.miss(phrase)
         else:
             lock = Lock(frame, r[3], phrase, r[2])
             crossings, prev = 0, None
             status = f"{phrase} locked (score {r[2]:.2f}) - sweep now"
             box.lock()
+            if voice is not None:
+                # After box.lock(), never instead of it. The two beeps are what
+                # tell you to start sweeping; the sentence tells you which way.
+                voice.lock(phrase, r[0], r[1])
         print(status, flush=True)
 
     if not args.headless:
@@ -146,6 +164,8 @@ def main():
             status = f"lost the {lock.phrase}, press t and ask again"
             lock = None
             box.stop()
+            if voice is not None:
+                voice.lost()
 
         target = lock.centre if lock is not None else None
 
@@ -266,12 +286,16 @@ def main():
         if k == ord('r'):
             lock, prev, crossings = None, None, 0
             box.stop(); status = "press SPACE, say what you want, press again"
+            if voice is not None:
+                voice.stop()        # drop a sentence about the lock we just cleared
         if k == ord(' ') and listener is not None:
             # OpenCV windows give no key-up event, so SPACE toggles rather
             # than holds: press to start talking, press again when done.
             if not recording:
                 recording = True
                 box.stop()
+                if voice is not None:
+                    voice.stop()    # do not talk over the person at the mic
                 status = "listening"
                 listener.start()
             else:
@@ -283,6 +307,8 @@ def main():
     cap.release()
     cv2.destroyAllWindows()
     box.stop()
+    if voice is not None:
+        voice.close()
 
 
 if __name__ == "__main__":

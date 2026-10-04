@@ -43,8 +43,15 @@ Pi:
 
     python main.py                      # the whole thing
     python main.py --host crosshair.local   # beeps from the Pi instead
+    python main.py --voice              # the same beeps, plus spoken context
 
 SPACE to talk, SPACE again when done. r resets, q quits.
+
+To turn the speech on, copy `.env.example` to `.env`, put your key in
+`XAI_API_KEY`, and run with `--voice`. With no key `--voice` still works and
+speaks through macOS `say`, offline and free, so a demo cannot die of an expired
+key. The beeps are identical either way, because they are the part that has to
+be on time.
 
 Parts, runnable alone when something is misbehaving:
 
@@ -55,6 +62,8 @@ Parts, runnable alone when something is misbehaving:
     python detect.py "ketchup" "mug"    # point the camera, see what it finds
     python sweep.py                     # crossing logic with a hand-placed target
     python tones.py                     # just the sounds
+    python speak.py                     # just the speech, out loud
+    python speak.py --test              # proves the no-key fallback
 
 ## Sound design
 
@@ -63,6 +72,12 @@ Parts, runnable alone when something is misbehaving:
 | two fast 1800Hz beeps | found it, start sweeping |
 | one 700Hz beep | your hand is on it, now |
 | pulse train, rising pitch and rate | closing in on the reach |
+
+Beeps carry everything that is timed. Speech, with `--voice`, carries only what
+a beep cannot say: which object it locked and roughly where it is, that it
+cannot see the thing you asked for, and that it lost the lock. Nothing on the
+crossing path goes through it, because a speech API round trip is two orders of
+magnitude slower than the millisecond the crossing beep has to hit.
 
 ## Measured on this hardware
 

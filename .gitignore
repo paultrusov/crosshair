@@ -5,3 +5,5 @@ __pycache__/
 pi/keys/
 camera.json
 sessions/
+.env
+.voice/
