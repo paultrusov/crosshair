@@ -32,6 +32,46 @@ Pi:
     cd ~/crosshair-pi && ./setup_pi.sh
     python3 buzzbox.py
 
+## Standalone: no laptop (branch `standalone-pi`)
+
+Everything on the Pi 5: webcam, mic, button and motor all plug into it, and it
+starts by itself at boot. This is the flow from the writeup:
+
+| Step | You feel | Box (with `--show`) |
+|---|---|---|
+| press the button, say the word, press again | one tick each press | |
+| found and in frame | three vibrations | red |
+| move your arm up or down until level with it | three vibrations | yellow |
+| sweep sideways across it | one buzz each time you cross it | green |
+| not found / lost the lock | one long / two long | |
+
+Long press resets.
+
+Wiring: motor (Grove vibration motor module, it has its own driver) or the
+buzzer on **D5**, button on **D18**, USB webcam and USB mic (the Brio's own mic
+works) in the Pi's USB ports. A bare FA-130 motor cannot run off a GPIO pin;
+see Dead ends.
+
+On the Pi, once, with internet:
+
+    git clone -b standalone-pi https://github.com/paultrusov/crosshair
+    cd crosshair && ./pi/setup_standalone.sh          # OUT=buzzer ./pi/... for the buzzer
+
+Then test by hand and reboot:
+
+    ~/crosshair-venv/bin/python haptics.py            # every signal, then the button
+    ~/crosshair-venv/bin/python onboard.py            # Ctrl-C to stop
+    sudo reboot                                       # now it runs at power-on
+    journalctl -u crosshair -f                        # what it is doing
+
+Do not run `buzzbox.py` at the same time; both want D5.
+
+What it gives up to fit the Pi: OWL-ViT base/32 (`detect_lite.py`) instead of
+OWLv2, 640x480 instead of 720p, background re-detect every 3 s instead of
+1.2 s, whisper `base.en` instead of `small.en`. The crossing still fires early
+by the measured loop time, which is longer on the Pi. None of the numbers in
+"Measured on this hardware" apply to this build; measure it again on the Pi.
+
 ## Wiring
 
 | Part      | Grove port | BCM |

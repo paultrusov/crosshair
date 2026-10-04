@@ -15,7 +15,7 @@ import cv2
 class Lock:
     """A tracked object. `centre` is what the sweep compares a wrist against."""
 
-    def __init__(self, frame, box_norm, phrase, score):
+    def __init__(self, frame, box_norm, phrase, score, make=None):
         h, w = frame.shape[:2]
         x0, y0, x1, y1 = box_norm
         self.phrase = phrase
@@ -24,7 +24,9 @@ class Lock:
         self.lost_frames = 0
         bbox = (int(x0 * w), int(y0 * h),
                 max(8, int((x1 - x0) * w)), max(8, int((y1 - y0) * h)))
-        self.tracker = cv2.TrackerCSRT_create()
+        # make: a tracker factory. CSRT by default; the Pi build can pass KCF,
+        # which is several times cheaper and drifts more.
+        self.tracker = (make or cv2.TrackerCSRT_create)()
         self.tracker.init(frame, bbox)
         self.bbox = bbox
         self._wh = (w, h)
